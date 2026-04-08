@@ -2,5 +2,7 @@ node_modules/
 .env
 dist/
 .vercel/
-.claude/activity.log
 .vercel
+.claude/
+lms-claude-code-guide.md
+test-results/
