@@ -1,4 +1,7 @@
 {
+  "scripts": {
+    "build": "cd client && npm install && npm run build"
+  },
   "devDependencies": {
     "@playwright/test": "^1.59.1"
   }
