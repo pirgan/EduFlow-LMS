@@ -1,0 +1,107 @@
+name: EduFlow LMS CI/CD
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+env:
+  NODE_VERSION: '20.x'
+
+jobs:
+  # ------------------------------------------------
+  # Job 1: Run all tests
+  # ------------------------------------------------
+  test:
+    name: Test Suite
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: |
+            server/package-lock.json
+            client/package-lock.json
+
+      - name: Install server dependencies
+        run: cd server && npm ci
+
+      - name: Install client dependencies
+        run: cd client && npm ci
+
+      - name: Run server unit tests
+        run: cd server && npm run test:unit -- --run --reporter=verbose
+        env:
+          JWT_SECRET: ci_test_secret_eduflow_lms
+          ANTHROPIC_API_KEY: test_key_always_mocked_never_real
+          # No MONGODB_URI — unit tests mock mongoose entirely
+
+      - name: Run server integration tests
+        run: cd server && npm test -- --run
+        env:
+          JWT_SECRET: ci_test_secret_eduflow_lms
+          ANTHROPIC_API_KEY: test_key_always_mocked_never_real
+          # mongodb-memory-server spins up an in-memory MongoDB — no Atlas needed
+
+      - name: Run client unit tests
+        run: cd client && npm run test:unit -- --run
+
+      - name: Generate coverage report
+        run: cd server && npm run test:coverage -- --run
+        env:
+          JWT_SECRET: ci_test_secret_eduflow_lms
+          ANTHROPIC_API_KEY: test_key
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./server/coverage/lcov.info,./client/coverage/lcov.info
+          flags: eduflow-lms
+        continue-on-error: true  # coverage upload failure should not block deploy
+
+  # ------------------------------------------------
+  # Job 2: Build check
+  # ------------------------------------------------
+  build:
+    name: Build Check
+    runs-on: ubuntu-latest
+    needs: test  # only runs if test job passes
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install and build client
+        run: cd client && npm ci && npm run build
+        env:
+          VITE_API_URL: https://placeholder.vercel.app/api
+          # Placeholder URL — the real URL is set in Vercel environment variables
+
+  # ------------------------------------------------
+  # Job 3: Deploy to Vercel (main branch only)
+  # ------------------------------------------------
+  deploy:
+    name: Deploy to Vercel
+    runs-on: ubuntu-latest
+    needs: [test, build]  # only runs if both previous jobs pass
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    # Auto-deploys on every push to main — never on PRs or develop branch
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to Vercel Production
+        run: npx vercel --prod --token=${{ secrets.VERCEL_TOKEN }} --confirm
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
