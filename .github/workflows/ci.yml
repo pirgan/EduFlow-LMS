@@ -36,7 +36,7 @@ jobs:
         run: cd client && npm ci
 
       - name: Run server unit tests
-        run: cd server && npm run test:unit -- --run --reporter=verbose
+        run: cd server && npm run test:unit -- --reporter=verbose
         env:
           JWT_SECRET: ci_test_secret_eduflow_lms
           ANTHROPIC_API_KEY: test_key_always_mocked_never_real

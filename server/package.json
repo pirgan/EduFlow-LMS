@@ -7,7 +7,7 @@
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
     "test": "vitest run",
-    "test:unit": "vitest run --testPathPattern=unit",
+    "test:unit": "vitest run unit",
     "test:coverage": "vitest run --coverage"
   },
   "keywords": [],
