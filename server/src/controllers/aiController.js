@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import { anthropic } from '../config/anthropic.js';
 import Course from '../models/Course.js';
 import ContentChunk from '../models/ContentChunk.js';
@@ -166,4 +167,99 @@ export const contentChat = async (req, res) => {
   });
 
   res.json({ answer: msg.content[0].text, sources: chunks.map((c) => ({ source: c.source, section: c.section })) });
+};
+
+// POST /api/ai/content-chat  (authenticated, SSE streaming)
+// Body: { query: string, courseId: string | null, history: [{role, content}] }
+//
+// Three-step RAG pipeline with streaming output:
+//   1. Keyword extraction via Haiku (non-streaming) — pulls 3-6 search terms from the query.
+//   2. MongoDB $text search against ContentChunk collection using those keywords.
+//   3. Answer synthesis via Sonnet (streaming) — grounded in the retrieved chunks,
+//      with [Lesson: <title>] citations. Sources are extracted from the full response
+//      and sent as a final SSE event before [DONE].
+export const contentChatStream = async (req, res) => {
+  const { query, courseId, history = [] } = req.body;
+
+  if (!query || !query.trim()) {
+    return res.status(400).json({ message: 'query is required' });
+  }
+
+  // SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+
+  // Step 1 — Keyword extraction (Haiku, non-streaming)
+  let keywords;
+  try {
+    const kwMsg = await anthropic.messages.create({
+      model: 'claude-3-5-haiku-20241022',
+      max_tokens: 128,
+      system: 'Return ONLY a JSON array of 3-6 search keywords. No prose. Example: ["react","hooks","useState"]',
+      messages: [{ role: 'user', content: `Extract search keywords from: "${query}"` }],
+    });
+    keywords = JSON.parse(kwMsg.content[0].text);
+    if (!Array.isArray(keywords)) throw new Error('not array');
+  } catch {
+    keywords = query.trim().split(/\s+/);
+  }
+
+  // Step 2 — Chunk retrieval via $text search
+  const textQuery = { $text: { $search: keywords.join(' ') } };
+  if (courseId) textQuery.courseId = new mongoose.Types.ObjectId(courseId);
+
+  const chunks = await ContentChunk.find(textQuery, { score: { $meta: 'textScore' } })
+    .sort({ score: { $meta: 'textScore' } })
+    .limit(5);
+
+  if (!chunks.length) {
+    res.write(`data: ${JSON.stringify({ chunk: "I couldn't find relevant information in the course content for that question. Try rephrasing, or check the lesson list for the topic." })}\n\n`);
+    res.write('data: [DONE]\n\n');
+    return res.end();
+  }
+
+  // Step 3 — Answer synthesis (Sonnet, streaming)
+  const contextBlock = chunks
+    .map((c) => `[Source: ${c.source} | Lesson: ${c.section}]\n${c.content}`)
+    .join('\n\n---\n\n');
+
+  const messages = [
+    ...history,
+    { role: 'user', content: `${query}\n\nCourse Content:\n${contextBlock}` },
+  ];
+
+  let fullResponse = '';
+  const stream = await anthropic.messages.create({
+    model: 'claude-3-5-sonnet-20241022',
+    max_tokens: 1024,
+    system: `You are EduFlow's course assistant. Answer student questions ONLY using the provided course content excerpts. Always cite which lesson your answer comes from using [Lesson: <title>] notation. If the answer is not in the content, say so clearly and suggest the student check the lesson directly. Be encouraging and educational.`,
+    messages,
+    stream: true,
+  });
+
+  for await (const event of stream) {
+    if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+      const delta = event.delta.text;
+      fullResponse += delta;
+      res.write(`data: ${JSON.stringify({ chunk: delta })}\n\n`);
+    }
+  }
+
+  // Extract and deduplicate [Lesson: <title>] citations
+  const citationRegex = /\[Lesson:\s*([^\]]+)\]/g;
+  const seen = new Set();
+  const citedLessons = [];
+  for (const match of fullResponse.matchAll(citationRegex)) {
+    const lessonTitle = match[1].trim();
+    if (!seen.has(lessonTitle)) {
+      seen.add(lessonTitle);
+      const chunk = chunks.find((c) => c.section === lessonTitle);
+      citedLessons.push({ lessonTitle, courseTitle: chunk?.source ?? '' });
+    }
+  }
+
+  res.write(`data: ${JSON.stringify({ sources: citedLessons })}\n\n`);
+  res.write('data: [DONE]\n\n');
+  res.end();
 };

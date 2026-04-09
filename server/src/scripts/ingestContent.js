@@ -1,76 +1,67 @@
-// RAG ingestion pipeline — run once after seeding, and again whenever course
-// content changes: node src/scripts/ingestContent.js
-//
-// What it does:
-//   1. Fetches all published courses from MongoDB.
-//   2. For each course, deletes its existing ContentChunk documents (full refresh).
-//   3. Splits the course description and each lesson's text into ~500-word chunks.
-//   4. Saves each chunk as a ContentChunk document with source/section metadata.
-//
-// The resulting ContentChunk collection is searched by aiController.contentChat
-// using MongoDB $text to retrieve relevant passages before sending them to Claude.
-
 import 'dotenv/config';
-import connectDB from '../config/db.js';
+import mongoose from 'mongoose';
 import Course from '../models/Course.js';
 import ContentChunk from '../models/ContentChunk.js';
 
-// Splits a string into an array of word-count-bounded chunks.
-// Default is 500 words — large enough to give Claude useful context,
-// small enough to stay well within token limits when 5 chunks are combined.
-const chunkText = (text, maxWords = 500) => {
+// Split text at paragraph boundaries when over 500 words; otherwise return as-is.
+const splitChunks = (text, maxWords = 500) => {
   const words = text.split(/\s+/);
+  if (words.length <= maxWords) return [text];
+
+  const paragraphs = text.split(/\n\s*\n/).filter(Boolean);
   const chunks = [];
-  for (let i = 0; i < words.length; i += maxWords) {
-    chunks.push(words.slice(i, i + maxWords).join(' '));
+  let current = [];
+  let count = 0;
+
+  for (const para of paragraphs) {
+    const paraWords = para.split(/\s+/).length;
+    if (count + paraWords > maxWords && current.length) {
+      chunks.push(current.join('\n\n'));
+      current = [];
+      count = 0;
+    }
+    current.push(para);
+    count += paraWords;
   }
-  return chunks;
+  if (current.length) chunks.push(current.join('\n\n'));
+  return chunks.length ? chunks : [text];
 };
 
 const ingest = async () => {
-  await connectDB();
+  await mongoose.connect(process.env.MONGODB_URI);
+
   const courses = await Course.find({ status: 'published' });
-  console.log(`Ingesting ${courses.length} published courses...`);
+  let totalChunks = 0;
 
   for (const course of courses) {
-    // Full refresh: delete old chunks before re-inserting so stale content
-    // does not persist after a course description or lesson list is updated.
-    await ContentChunk.deleteMany({ courseId: course._id });
-
-    // Chunk the top-level course description under a synthetic "Course Overview" section
-    const descChunks = chunkText(course.description);
-    for (let i = 0; i < descChunks.length; i++) {
-      await ContentChunk.create({
-        source: course.title,
-        section: 'Course Overview',
-        chunkIndex: i,
-        content: descChunks[i],
-        wordCount: descChunks[i].split(/\s+/).length,
-        courseId: course._id,
-      });
-    }
-
-    // Chunk each lesson's title + description (if any).
-    // Lesson descriptions are optional in this schema so we skip empty strings.
     for (const lesson of course.lessons) {
-      const text = `${lesson.title}. ${lesson.description || ''}`.trim();
-      if (!text) continue;
-      const lessonChunks = chunkText(text);
-      for (let i = 0; i < lessonChunks.length; i++) {
-        await ContentChunk.create({
-          source: course.title,
-          section: lesson.title,
-          chunkIndex: i,
-          content: lessonChunks[i],
-          wordCount: lessonChunks[i].split(/\s+/).length,
-          courseId: course._id,
-        });
+      const text = [lesson.title, lesson.description].filter(Boolean).join(' ');
+      if (!text.trim()) continue;
+
+      const chunks = splitChunks(text);
+      for (let i = 0; i < chunks.length; i++) {
+        const chunkText = chunks[i];
+        await ContentChunk.updateOne(
+          { courseId: course._id, section: lesson.title, chunkIndex: i },
+          {
+            $set: {
+              source: course.title,
+              section: lesson.title,
+              chunkIndex: i,
+              content: chunkText,
+              wordCount: chunkText.split(/\s+/).length,
+              courseId: course._id,
+            },
+          },
+          { upsert: true }
+        );
+        totalChunks++;
       }
     }
-    console.log(`  ✓ ${course.title}`);
   }
 
-  console.log('Ingest complete.');
+  console.log(`Ingested ${totalChunks} chunks from ${courses.length} courses.`);
+  await mongoose.disconnect();
   process.exit(0);
 };
 

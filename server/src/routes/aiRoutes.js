@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { summariseCourse, generateQuiz, recommendCourses, adaptLearningPath, explainConcept, contentChat } from '../controllers/aiController.js';
+import { summariseCourse, generateQuiz, recommendCourses, adaptLearningPath, explainConcept, contentChat, contentChatStream } from '../controllers/aiController.js';
 import { protect } from '../middleware/authMiddleware.js';
 import { aiRateLimit } from '../middleware/rateLimit.js';
 
@@ -14,4 +14,5 @@ router.post('/recommend', recommendCourses);          // personalised course rec
 router.post('/adapt/:courseId', adaptLearningPath);   // adaptive study plan for weak topics
 router.post('/explain', explainConcept);              // plain-language concept explainer
 router.post('/chat', contentChat);                    // RAG chatbot grounded in course content
+router.post('/content-chat', contentChatStream);      // SSE streaming RAG chatbot with citations
 export default router;
