@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { useAuth } from '../context/AuthContext.jsx';
 
 // Detects courseId from /courses/:id or /courses/:id/* URLs
 function useCourseIdFromPath() {
@@ -29,6 +30,7 @@ function useCourseIdFromPath() {
 }
 
 export default function AIChatbot() {
+  const { user } = useAuth();
   const [isOpen, setIsOpen]     = useState(false);
   const [messages, setMessages] = useState([]);
   const [input, setInput]       = useState('');
@@ -93,6 +95,7 @@ export default function AIChatbot() {
         signal: controller.signal,
       });
 
+      if (res.status === 401) throw new Error('auth');
       if (!res.ok) throw new Error('Request failed');
 
       const reader  = res.body.getReader();
@@ -131,9 +134,12 @@ export default function AIChatbot() {
       }
     } catch (err) {
       if (err.name !== 'AbortError') {
+        const content = err.message === 'auth'
+          ? 'Please log in to use the AI assistant.'
+          : 'Sorry, something went wrong. Please try again.';
         setMessages((prev) => {
           const next = [...prev];
-          next[next.length - 1] = { ...next[next.length - 1], content: 'Sorry, something went wrong. Please try again.' };
+          next[next.length - 1] = { ...next[next.length - 1], content };
           return next;
         });
       }
@@ -145,6 +151,9 @@ export default function AIChatbot() {
   const handleKey = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
   };
+
+  // Only show to authenticated users
+  if (!user) return null;
 
   return (
     <>
