@@ -194,7 +194,7 @@ export const contentChatStream = async (req, res) => {
   let keywords;
   try {
     const kwMsg = await anthropic.messages.create({
-      model: 'claude-3-5-haiku-20241022',
+      model: 'claude-haiku-4-5-20251001',
       max_tokens: 128,
       system: 'Return ONLY a JSON array of 3-6 search keywords. No prose. Example: ["react","hooks","useState"]',
       messages: [{ role: 'user', content: `Extract search keywords from: "${query}"` }],
@@ -231,7 +231,7 @@ export const contentChatStream = async (req, res) => {
 
   let fullResponse = '';
   const stream = await anthropic.messages.create({
-    model: 'claude-3-5-sonnet-20241022',
+    model: 'claude-sonnet-4-6',
     max_tokens: 1024,
     system: `You are EduFlow's course assistant. Answer student questions ONLY using the provided course content excerpts. Always cite which lesson your answer comes from using [Lesson: <title>] notation. If the answer is not in the content, say so clearly and suggest the student check the lesson directly. Be encouraging and educational.`,
     messages,
