@@ -49,6 +49,10 @@ export default function CourseDetail() {
 
   const submitReview = async (e) => {
     e.preventDefault();
+    if (!myRating) {
+      toast.error('Please select a star rating before submitting.');
+      return;
+    }
     try {
       const { data } = await api.post(`/reviews/${id}`, { rating: myRating, comment });
       setReviews((prev) => [data, ...prev]);
@@ -68,7 +72,7 @@ export default function CourseDetail() {
       {/* Banner */}
       <div className="rounded-2xl overflow-hidden mb-8 relative">
         <img
-          src={course.thumbnail || 'https://placehold.co/900x350?text=EduFlow'}
+          src={course.thumbnail || `https://picsum.photos/seed/${course._id}/900/350`}
           alt={course.title}
           className="w-full h-64 object-cover"
         />
@@ -85,6 +89,9 @@ export default function CourseDetail() {
         {/* Main */}
         <div className="flex-1">
           <div className="flex items-center gap-3 mb-4">
+            {course.rating?.average > 0 && (
+              <span className="text-lg font-bold text-amber-500">{course.rating.average.toFixed(1)}</span>
+            )}
             <StarRating value={Math.round(course.rating?.average || 0)} readOnly />
             <span className="text-sm text-gray-500">({course.rating?.count || 0} reviews)</span>
             <span className="text-sm text-gray-400 capitalize">• {course.difficulty}</span>

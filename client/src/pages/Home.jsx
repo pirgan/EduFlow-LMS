@@ -5,18 +5,15 @@ import CourseCard from '../components/CourseCard.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import { toast } from 'react-toastify';
 
-const CATEGORIES = ['All', 'Programming', 'Design', 'Business', 'Marketing', 'Data Science'];
-
 export default function Home() {
   const { user } = useAuth();
   const [courses, setCourses] = useState([]);
-  const [category, setCategory] = useState('All');
   const [enrolledIds, setEnrolledIds] = useState([]);
 
   useEffect(() => {
-    const params = category !== 'All' ? { category } : {};
-    api.get('/courses', { params }).then((r) => setCourses(r.data.courses));
-  }, [category]);
+    api.get('/courses', { params: { sort: 'popular', limit: 12 } })
+      .then((r) => setCourses(r.data.courses));
+  }, []);
 
   useEffect(() => {
     if (user) {
@@ -88,26 +85,13 @@ export default function Home() {
       {/* Category tabs + course grid */}
       <section className="max-w-7xl mx-auto px-6 py-10">
         <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-bold text-[#1A1A1A]">Featured Courses</h2>
+          <div>
+            <h2 className="text-2xl font-bold text-[#1A1A1A]">Most Popular Courses</h2>
+            <p className="text-sm text-[#888] mt-0.5">Top 12 courses by student enrolments</p>
+          </div>
           <Link to="/courses" className="text-sm text-indigo-600 hover:underline font-medium">
             View all →
           </Link>
-        </div>
-
-        <div className="flex gap-2 flex-wrap mb-6">
-          {CATEGORIES.map((cat) => (
-            <button
-              key={cat}
-              onClick={() => setCategory(cat)}
-              className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
-                category === cat
-                  ? 'bg-indigo-600 text-white'
-                  : 'bg-white text-[#666] border border-[#EEF0F2] hover:border-indigo-300 hover:text-indigo-600'
-              }`}
-            >
-              {cat}
-            </button>
-          ))}
         </div>
 
         {courses.length === 0 ? (

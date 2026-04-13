@@ -10,9 +10,10 @@ export const getCourses = async (req, res) => {
   const filter = { status: 'published' };
   if (category) filter.category = category;
   if (difficulty) filter.difficulty = difficulty;
+  const sortOrder = req.query.sort === 'popular' ? '-totalStudents -createdAt' : '-createdAt';
   const courses = await Course.find(filter)
     .populate('instructor', 'name avatar')
-    .sort('-createdAt')
+    .sort(sortOrder)
     .skip((page - 1) * limit)
     .limit(Number(limit));
   const total = await Course.countDocuments(filter);
