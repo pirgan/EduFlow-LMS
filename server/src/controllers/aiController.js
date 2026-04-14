@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import { anthropic } from '../config/anthropic.js';
 import Course from '../models/Course.js';
 import ContentChunk from '../models/ContentChunk.js';
+import Review from '../models/Review.js';
 
 // All handlers in this file call the Anthropic Claude API server-side.
 // The SDK singleton is imported from config/anthropic.js.
@@ -9,32 +10,45 @@ import ContentChunk from '../models/ContentChunk.js';
 // defined in middleware/rateLimit.js to prevent runaway API costs.
 
 // GET /api/ai/summarise/:courseId  (authenticated)
-// Generates a 3-4 sentence marketing-style summary of a course aimed at a
-// prospective student. The result is cached in the Course.aiSummary field so
-// subsequent requests for the same course return instantly without a Claude call.
-// The cache is intentionally never invalidated automatically — if the course
-// content changes significantly the instructor should clear aiSummary manually.
+// Generates a 3-4 sentence summary of a course for prospective students.
+// Incorporates student review comments (up to 5) so the summary reflects real
+// learner feedback alongside the course content.
+// The result is cached in Course.aiSummary. Pass ?regenerate=1 to bust the
+// cache and re-generate with the latest reviews.
 export const summariseCourse = async (req, res) => {
   const course = await Course.findById(req.params.courseId);
   if (!course) return res.status(404).json({ message: 'Course not found' });
 
-  // Return cached summary if it exists — avoids redundant API calls
-  if (course.aiSummary) return res.json({ summary: course.aiSummary });
+  // Serve from cache unless the caller explicitly asks for a fresh generation
+  if (course.aiSummary && req.query.regenerate !== '1') {
+    return res.json({ summary: course.aiSummary, reviewCount: course.rating?.count || 0 });
+  }
 
   const lessonText = course.lessons.map((l) => `- ${l.title}`).join('\n');
+
+  // Pull up to 5 reviews to enrich the summary with student perspectives
+  const reviews = await Review.find({ course: course._id })
+    .sort('-createdAt')
+    .limit(5)
+    .select('rating comment');
+
+  const reviewBlock = reviews.length
+    ? '\n\nStudent Reviews:\n' + reviews.map((r) => `- (${r.rating}/5) "${r.comment}"`).join('\n')
+    : '';
+
+  const prompt = `Summarise this course in 3-4 sentences for a prospective student.${
+    reviews.length ? ' Weave in insights from the student reviews to give an honest, balanced view.' : ''
+  }\n\nTitle: ${course.title}\nDescription: ${course.description}\nLessons:\n${lessonText}${reviewBlock}`;
+
   const msg = await anthropic.messages.create({
     model: 'claude-haiku-4-5-20251001',
     max_tokens: 512,
-    messages: [{
-      role: 'user',
-      content: `Summarise this course in 3-4 sentences for a prospective student.\n\nTitle: ${course.title}\nDescription: ${course.description}\nLessons:\n${lessonText}`,
-    }],
+    messages: [{ role: 'user', content: prompt }],
   });
 
   const summary = msg.content[0].text;
-  // Persist the summary so future requests are served from the DB
   await Course.findByIdAndUpdate(course._id, { aiSummary: summary });
-  res.json({ summary });
+  res.json({ summary, reviewCount: reviews.length });
 };
 
 // GET /api/ai/quiz/:courseId  (authenticated)

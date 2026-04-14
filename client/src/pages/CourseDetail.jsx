@@ -13,6 +13,7 @@ export default function CourseDetail() {
   const [reviews, setReviews] = useState([]);
   const [enrolled, setEnrolled] = useState(false);
   const [summary, setSummary] = useState('');
+  const [summaryReviewCount, setSummaryReviewCount] = useState(0);
   const [loadingSummary, setLoadingSummary] = useState(false);
   const [myRating, setMyRating] = useState(0);
   const [comment, setComment] = useState('');
@@ -38,11 +39,14 @@ export default function CourseDetail() {
     }
   };
 
-  const fetchSummary = async () => {
+  const fetchSummary = async (regenerate = false) => {
     setLoadingSummary(true);
     try {
-      const { data } = await api.get(`/ai/summarise/${id}`);
+      const { data } = await api.get(`/ai/summarise/${id}`, {
+        params: regenerate ? { regenerate: '1' } : {},
+      });
       setSummary(data.summary);
+      setSummaryReviewCount(data.reviewCount || 0);
     } catch { toast.error('Could not load AI summary'); }
     finally { setLoadingSummary(false); }
   };
@@ -118,21 +122,42 @@ export default function CourseDetail() {
           {/* AI Summary */}
           <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-5 mb-6">
             <div className="flex items-center justify-between mb-2">
-              <h2 className="font-bold text-indigo-700 text-sm">🤖 AI Course Summary</h2>
-              {!summary && (
-                <button
-                  onClick={fetchSummary}
-                  disabled={loadingSummary}
-                  className="text-xs text-indigo-600 hover:underline disabled:opacity-50"
-                >
-                  {loadingSummary ? 'Generating…' : 'Generate'}
-                </button>
-              )}
+              <div className="flex items-center gap-2">
+                <h2 className="font-bold text-indigo-700 text-sm">🤖 AI Course Summary</h2>
+                {summary && summaryReviewCount > 0 && (
+                  <span className="text-[10px] bg-indigo-200 text-indigo-700 rounded-full px-2 py-0.5 font-medium">
+                    Includes {summaryReviewCount} student review{summaryReviewCount !== 1 ? 's' : ''}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-3">
+                {summary && (
+                  <button
+                    onClick={() => fetchSummary(true)}
+                    disabled={loadingSummary}
+                    className="text-xs text-indigo-400 hover:text-indigo-600 hover:underline disabled:opacity-50 transition-colors"
+                  >
+                    {loadingSummary ? 'Regenerating…' : '↻ Regenerate'}
+                  </button>
+                )}
+                {!summary && (
+                  <button
+                    onClick={() => fetchSummary(false)}
+                    disabled={loadingSummary}
+                    className="text-xs text-indigo-600 hover:underline disabled:opacity-50 font-medium"
+                  >
+                    {loadingSummary ? 'Generating…' : 'Generate'}
+                  </button>
+                )}
+              </div>
             </div>
             {summary ? (
               <p className="text-sm text-gray-700 leading-relaxed">{summary}</p>
             ) : (
-              <p className="text-sm text-gray-400 italic">Click "Generate" to get an AI-written summary.</p>
+              <p className="text-sm text-gray-400 italic">
+                Click "Generate" to get an AI-written summary
+                {reviews.length > 0 ? ` enriched with ${reviews.length} student review${reviews.length !== 1 ? 's' : ''}` : ''}.
+              </p>
             )}
           </div>
 
